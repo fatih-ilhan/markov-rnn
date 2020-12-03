@@ -12,7 +12,7 @@ from torch.autograd import Variable
 from utils.time_distributed import TimeDistributed
 
 
-class MarkovRNN(nn.Module):
+class MarkovGRU(nn.Module):
     torch.manual_seed(1)
 
     optimizer_dispatcher = {"sgd": SGD,
@@ -22,18 +22,17 @@ class MarkovRNN(nn.Module):
     nonlinearity_dispatcher = {"tanh": torch.tanh}
 
     def __init__(self, input_dim, output_dim,
-                 hidden_dim=16, bias=(False, False), init_std=0.1, nonlinearity='tanh', trunc_len=10, window_len=1,
+                 hidden_dim=16, bias=(False, False), init_std=0.1, trunc_len=10, window_len=1,
                  num_state=3, beta=0.9, alpha=0.5, concentration=10, lr=0.01, weight_decay=0, optimizer="sgd",
                  shuffle_flag=False, device='cpu'):
 
-        super(MarkovRNN, self).__init__()
+        super(MarkovGRU, self).__init__()
 
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.bias = bias
         self.init_std = init_std
-        self.nonlinearity = nonlinearity
         self.trunc_len = trunc_len
         self.window_len = window_len
         self.num_state = num_state
@@ -48,14 +47,6 @@ class MarkovRNN(nn.Module):
 
         self.cell_list = self.__init_cells()
         self.out_layer = nn.Linear(hidden_dim, output_dim, bias=bias[1])
-
-        if nonlinearity == "relu":
-            with torch.no_grad():
-                for cell in self.cell_list:
-                    for parameter in cell.parameters():
-                        torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
-                for parameter in self.out_layer.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
 
         if num_state == 1:
             alpha_vector = np.array([1])
@@ -77,8 +68,7 @@ class MarkovRNN(nn.Module):
         """
         cell_list = []
         for k in range(self.num_state):
-            cell = nn.RNNCell(input_size=self.input_dim, hidden_size=self.hidden_dim, bias=self.bias[0],
-                              nonlinearity=self.nonlinearity)
+            cell = nn.GRUCell(input_size=self.input_dim, hidden_size=self.hidden_dim, bias=self.bias[0])
             cell_list.append(cell)
         cell_list = nn.ModuleList(cell_list)
         return cell_list

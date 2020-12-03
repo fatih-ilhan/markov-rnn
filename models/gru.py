@@ -8,7 +8,7 @@ from torch.autograd import Variable, Function
 from torch.nn.modules.loss import _Loss
 
 
-class RNN(nn.Module):
+class GRU(nn.Module):
     torch.manual_seed(1)
 
     optimizer_dispatcher = {"sgd": SGD,
@@ -16,17 +16,16 @@ class RNN(nn.Module):
                             "adam": Adam}
 
     def __init__(self, input_dim, output_dim,
-                 hidden_dim=16, bias=[0, 0], init_std=0.1, nonlinearity='relu', trunc_len=10, window_len=1, lr=0.01,
+                 hidden_dim=16, bias=[0, 0], init_std=0.1, trunc_len=10, window_len=1, lr=0.01,
                  weight_decay=1e-4, optimizer="sgd", shuffle_flag=False, device='cpu'):
 
-        super(RNN, self).__init__()
+        super(GRU, self).__init__()
 
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.bias = bias
         self.init_std = init_std
-        self.nonlinearity = nonlinearity
         self.trunc_len = trunc_len
         self.window_len = window_len
         self.weight_decay = weight_decay
@@ -35,15 +34,8 @@ class RNN(nn.Module):
         self.shuffle_flag = shuffle_flag
         self.device = device
 
-        self.cell = nn.RNNCell(input_size=input_dim, hidden_size=hidden_dim, bias=bias[0], nonlinearity=nonlinearity)
+        self.cell = nn.GRUCell(input_size=input_dim, hidden_size=hidden_dim, bias=bias[0])
         self.out_layer = nn.Linear(hidden_dim, output_dim, bias=bias[1])
-
-        if nonlinearity == "relu":
-            with torch.no_grad():
-                for parameter in self.cell.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
-                for parameter in self.out_layer.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
 
         self.optimizer = self.optimizer_dispatcher[self.optimizer_name](lr=self.lr, weight_decay=self.weight_decay, params=self.parameters())
 

@@ -8,7 +8,7 @@ from torch.autograd import Variable, Function
 from torch.nn.modules.loss import _Loss
 
 
-class RNN(nn.Module):
+class LSTM(nn.Module):
     torch.manual_seed(1)
 
     optimizer_dispatcher = {"sgd": SGD,
@@ -16,17 +16,16 @@ class RNN(nn.Module):
                             "adam": Adam}
 
     def __init__(self, input_dim, output_dim,
-                 hidden_dim=16, bias=[0, 0], init_std=0.1, nonlinearity='relu', trunc_len=10, window_len=1, lr=0.01,
+                 hidden_dim=16, bias=[0, 0], init_std=0.1, trunc_len=10, window_len=1, lr=0.01,
                  weight_decay=1e-4, optimizer="sgd", shuffle_flag=False, device='cpu'):
 
-        super(RNN, self).__init__()
+        super(LSTM, self).__init__()
 
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.bias = bias
         self.init_std = init_std
-        self.nonlinearity = nonlinearity
         self.trunc_len = trunc_len
         self.window_len = window_len
         self.weight_decay = weight_decay
@@ -35,28 +34,25 @@ class RNN(nn.Module):
         self.shuffle_flag = shuffle_flag
         self.device = device
 
-        self.cell = nn.RNNCell(input_size=input_dim, hidden_size=hidden_dim, bias=bias[0], nonlinearity=nonlinearity)
+        self.cell = nn.LSTMCell(input_size=input_dim, hidden_size=hidden_dim, bias=bias[0])
         self.out_layer = nn.Linear(hidden_dim, output_dim, bias=bias[1])
-
-        if nonlinearity == "relu":
-            with torch.no_grad():
-                for parameter in self.cell.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
-                for parameter in self.out_layer.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
 
         self.optimizer = self.optimizer_dispatcher[self.optimizer_name](lr=self.lr, weight_decay=self.weight_decay, params=self.parameters())
 
     def __init_hidden_state(self):
         return Variable(torch.zeros(1, self.hidden_dim).to(self.device), requires_grad=False)
 
-    def forward(self, x, h):
+    def __init_cell_state(self):
+        return Variable(torch.zeros(1, self.hidden_dim).to(self.device), requires_grad=False)
+
+    def forward(self, x, h, c):
         # x shape (batch, input_size)
         # h shape (batch, hidden_size)
-        h = self.cell(x, h)   # None represents zero initial hidden state
+        # c shape (batch, hidden_size)
+        h, c = self.cell(x, (h, c))   # None represents zero initial hidden state
         out = self.out_layer(h)
 
-        return out, h
+        return out, h, c
 
     def fit(self, data, verbose=True):
 
@@ -64,7 +60,9 @@ class RNN(nn.Module):
         pred_list = []
 
         start_hidden_state = self.__init_hidden_state()
+        start_cell_state = self.__init_cell_state()
         self.hidden_state = start_hidden_state
+        self.cell_state = start_cell_state
 
         for i in tqdm(range(1, len(data) + 1)):  # data pass
 
@@ -77,6 +75,7 @@ class RNN(nn.Module):
             inputs, targets = zip(*data[start_idx: ii])
 
             hidden_state_list = [start_hidden_state]
+            cell_state_list = [start_cell_state]
 
             def closure():
                 self.zero_grad()
@@ -86,8 +85,9 @@ class RNN(nn.Module):
 
                 for step, inp in enumerate(inputs):  # bptt pass
 
-                    pred, hidden_state = self.forward(inp, hidden_state_list[-1])
+                    pred, hidden_state, cell_state = self.forward(inp, hidden_state_list[-1], cell_state_list[-1])
                     hidden_state_list.append(hidden_state)
+                    cell_state_list.append(cell_state)
                     pred_tensor_list.append(pred)
 
                     if not self.shuffle_flag:
@@ -123,10 +123,11 @@ class RNN(nn.Module):
 
         inputs, targets = zip(*data)
         hidden_state = self.hidden_state
+        cell_state = self.cell_state
 
         for step, inp in enumerate(inputs):  # bptt pass
 
-            pred, hidden_state = self.forward(inp, hidden_state)
+            pred, hidden_state, cell_state = self.forward(inp, hidden_state, cell_state)
             pred_tensor_list.append(pred)
             target_tensor_list.append(targets[step])
 
@@ -140,5 +141,6 @@ class RNN(nn.Module):
 
         if run_states:
             self.hidden_state = hidden_state
+            self.cell_state = cell_state
 
         return pred_list, loss_list

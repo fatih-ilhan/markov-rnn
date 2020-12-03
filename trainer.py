@@ -7,7 +7,11 @@ from copy import deepcopy
 import matplotlib as mpl
 
 from utils.evaluation_utils import evaluate, merge_results
+from models.gru import GRU
+from models.lstm import LSTM
 from models.rnn import RNN
+from models.markov_gru import MarkovGRU
+from models.markov_lstm import MarkovLSTM
 from models.markov_rnn import MarkovRNN
 
 
@@ -25,7 +29,8 @@ class Trainer:
         self.best_conf_idx = None
         self._is_fit = False
 
-        self.model_dispatcher = {"rnn": RNN, "markov_rnn": MarkovRNN}
+        self.model_dispatcher = {"rnn": RNN, "markov_rnn": MarkovRNN, "lstm": LSTM, "markov_lstm": MarkovLSTM,
+                                 "gru": GRU, "markov_gru": MarkovGRU}
 
     def grid_search(self, data, num_repeat=1, num_process=4, verbose=True, **experiment_params):
 

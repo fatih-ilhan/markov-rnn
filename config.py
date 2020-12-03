@@ -19,7 +19,42 @@ model_params_pool = {"rnn": {"hidden_dim": [8, 32],
                                     "lr": [3e-3],
                                     "weight_decay": [0],
                                     "nonlinearity": ["tanh"],
-                                    "optimizer": ["adam"]}}
+                                    "optimizer": ["adam"]},
+                     "lstm": {"hidden_dim": [8, 32],
+                              "bias": [[0, 0]],
+                              "trunc_len": [4, 16],
+                              "window_len": [1],
+                              "lr": [0.003, 0.01, 0.03],
+                              "weight_decay": [0],
+                              "optimizer": ["sgd"],
+                              "shuffle_flag": [False]},
+                     "markov_lstm": {"hidden_dim": [32],
+                                     "bias": [[0, 0]],
+                                     "alpha": [0.7],  # psi diagonal
+                                     "beta": [0.99],
+                                     "trunc_len": [8],
+                                     "num_state": [2],
+                                     "lr": [3e-3],
+                                     "weight_decay": [0],
+                                     "optimizer": ["adam"]},
+                     "gru": {"hidden_dim": [8, 32],
+                             "bias": [[0, 0]],
+                             "trunc_len": [4, 16],
+                             "window_len": [1],
+                             "lr": [0.003, 0.01, 0.03],
+                             "weight_decay": [0],
+                             "optimizer": ["sgd"],
+                             "shuffle_flag": [False]},
+                     "markov_gru": {"hidden_dim": [32],
+                                    "bias": [[0, 0]],
+                                    "alpha": [0.7],  # psi diagonal
+                                    "beta": [0.99],
+                                    "trunc_len": [8],
+                                    "num_state": [2],
+                                    "lr": [3e-3],
+                                    "weight_decay": [0],
+                                    "optimizer": ["adam"]}
+                     }
 
 
 # TODO : bugs in online mode - state continuity
