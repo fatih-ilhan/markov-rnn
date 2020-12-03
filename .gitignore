@@ -1,0 +1,6 @@
+.idea
+.coverage
+*.log
+results/*
+!results/.gitkeep
+visualizer.py
