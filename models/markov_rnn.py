@@ -19,21 +19,24 @@ class MarkovRNN(nn.Module):
                             "rmsprop": RMSprop,
                             "adam": Adam}
 
+    cell_dispatcher = {"rnn": nn.RNNCell,
+                       "gru": nn.GRUCell,
+                       "lstm": nn.LSTMCell}
+
     nonlinearity_dispatcher = {"tanh": torch.tanh}
 
-    def __init__(self, input_dim, output_dim,
-                 hidden_dim=16, bias=(False, False), init_std=0.1, nonlinearity='tanh', trunc_len=10, window_len=1,
+    def __init__(self, input_dim, output_dim, cell_type="rnn",
+                 hidden_dim=16, bias=(False, False), init_std=0.1, trunc_len=10, window_len=1,
                  num_state=3, beta=0.9, alpha=0.5, concentration=10, lr=0.01, weight_decay=0, optimizer="sgd",
                  shuffle_flag=False, device='cpu'):
 
-        super(MarkovRNN, self).__init__()
+        super(MarkovRNN , self).__init__()
 
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.bias = bias
         self.init_std = init_std
-        self.nonlinearity = nonlinearity
         self.trunc_len = trunc_len
         self.window_len = window_len
         self.num_state = num_state
@@ -45,17 +48,15 @@ class MarkovRNN(nn.Module):
         self.optimizer_name = optimizer
         self.shuffle_flag = shuffle_flag
         self.device = device
+        self.cell_type = cell_type
+
+        if self.cell_type == "lstm":
+            self.num_state_types = 2
+        else:
+            self.num_state_types = 1
 
         self.cell_list = self.__init_cells()
         self.out_layer = nn.Linear(hidden_dim, output_dim, bias=bias[1])
-
-        if nonlinearity == "relu":
-            with torch.no_grad():
-                for cell in self.cell_list:
-                    for parameter in cell.parameters():
-                        torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
-                for parameter in self.out_layer.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
 
         if num_state == 1:
             alpha_vector = np.array([1])
@@ -77,20 +78,13 @@ class MarkovRNN(nn.Module):
         """
         cell_list = []
         for k in range(self.num_state):
-            cell = nn.RNNCell(input_size=self.input_dim, hidden_size=self.hidden_dim, bias=self.bias[0],
-                              nonlinearity=self.nonlinearity)
+            cell = self.cell_dispatcher[self.cell_type](input_size=self.input_dim, hidden_size=self.hidden_dim, bias=self.bias[0])
             cell_list.append(cell)
         cell_list = nn.ModuleList(cell_list)
         return cell_list
 
-    def __init_hidden_state(self, batch_size):
-        """
-        Initializes hidden state with zeros
-        :param int batch_size: batch size (B)
-        :return Variable h: hidden state (B x Nh)
-        """
-        h = Variable(torch.zeros(batch_size, self.hidden_dim).to(self.device), requires_grad=False)
-        return h
+    def __init_states(self, batch_size):
+        return [Variable(torch.zeros(batch_size, self.hidden_dim).to(self.device), requires_grad=False) for _ in range(self.num_state_types)]
 
     def __init_belief(self, batch_size):
         """
@@ -112,30 +106,43 @@ class MarkovRNN(nn.Module):
         R = Variable(torch.eye(self.output_dim).repeat(self.num_state, 1, 1).to(self.device), requires_grad=False)
         return R
 
-    def forward(self, x, h, pi):
+    def forward(self, x, states, pi):
         """
         Forward pass
         :param x: input (B x Nx)
-        :param h: hidden state (B x Nh)
+        :param states: [state (B x Nh)]
         :param pi: belief (B x K)
         :return tuple: out (B x Ny), h (B x Nh), out_k (B x Ny x K), h_k (B x Nh x K)
         """
-        h_k = torch.zeros(x.shape[0], self.hidden_dim, self.num_state).to(self.device)  # B x Nh x K
+        states_k = [torch.zeros(x.shape[0], self.hidden_dim, self.num_state).to(self.device) for _ in range(self.num_state_types)]  # B x Nh x K
         for k in range(self.num_state):
-            h_k[:, :, k] = self.cell_list[k](x, h)
 
-        out_k = TimeDistributed(self.out_layer)(h_k.permute(0, 2, 1)).permute(0, 2, 1)  # B x Ny x K
+            if len(states) == 1:
+                sub_state_k = self.cell_list[k](x, states[0])
+            else:
+                sub_state_k = self.cell_list[k](x, states)
+
+            if not isinstance(sub_state_k, tuple):
+                sub_state_k = [sub_state_k]
+            else:
+                sub_state_k = list(sub_state_k)
+
+            for i, state in enumerate(states_k):
+                state[:, :, k] = sub_state_k[i]
+
+        out_k = self.out_layer(states_k[0].permute(0, 2, 1)).permute(0, 2, 1)  # B x Ny x K
 
         if self.device == "cuda":
-            h = torch.bmm(h_k, pi.unsqueeze(-1)).squeeze(-1)  # B x Nh
+            states = [torch.bmm(state, pi.unsqueeze(-1)).squeeze(-1) for state in states_k]  # B x Nh
         else:
-            h = torch.zeros(x.shape[0], self.hidden_dim).to(self.device)  # B x Nh
+            states = [torch.zeros(x.shape[0], self.hidden_dim).to(self.device) for _ in range(self.num_state_types)]  # B x Nh
             for b in range(x.shape[0]):
-                h[b] = h_k[b] @ pi[b]
+                for i in range(self.num_state_types):
+                    states[i][b] = states_k[i][b] @ pi[b]
 
-        out = self.out_layer(h)  # B x Ny
+        out = self.out_layer(states[0])  # B x Ny
 
-        return out, h, out_k, h_k
+        return out, states, out_k, states_k
 
     def compute_likelihood(self, error_k, R):
         """
@@ -194,15 +201,15 @@ class MarkovRNN(nn.Module):
         start_R = self.__init_R()
         self.R = start_R
 
-        start_hidden_state = self.__init_hidden_state(batch_size)
+        start_states = self.__init_states(batch_size)
         start_belief = self.__init_belief(batch_size)
-        self.hidden_state = start_hidden_state
+        self.states = start_states
         self.belief = start_belief
 
-        for i in tqdm(range(1, len(data) + 1)):  # data pass
+        for i in tqdm(range(self.trunc_len, len(data) + 1)):  # data pass
 
             if self.shuffle_flag:
-                ii = np.random.randint(self.trunc_len, len(data))
+                ii = np.random.randint(1, len(data))
             else:
                 ii = i
 
@@ -210,7 +217,7 @@ class MarkovRNN(nn.Module):
             inputs, targets = zip(*data[start_idx: ii])
 
             likelihood_list = []
-            hidden_state_list = [start_hidden_state]
+            states_list = [start_states]
             belief_list = [start_belief]
             R_list = [start_R]
 
@@ -226,13 +233,13 @@ class MarkovRNN(nn.Module):
 
                     inp = inp.to(self.device)
                     last_step_flag = step == len(inputs) - 1
-                    pred, hidden_state, pred_k, hidden_state_k = self.forward(inp, hidden_state_list[-1], belief_list[-1])
-                    hidden_state_list.append(hidden_state)
+                    pred, states, pred_k, states_k = self.forward(inp, states_list[-1], belief_list[-1])
+                    states_list.append(states)
                     pred_tensor_list.append(pred)
                     target = targets[step].to(self.device)
 
                     if not self.shuffle_flag:
-                        self.hidden_state = hidden_state
+                        self.states = states
 
                     if last_step_flag:  # update at the last step
 
@@ -261,7 +268,8 @@ class MarkovRNN(nn.Module):
                     likelihood_list.append(likelihood_vec)
 
                     if not self.shuffle_flag and step == 0:  # hold state for next data pass
-                        start_hidden_state.data = hidden_state.data
+                        for j, state in enumerate(start_states):
+                            state.data = states[j].data
                         start_belief.data = belief.data
 
                     if not self.shuffle_flag and last_step_flag:
@@ -287,7 +295,7 @@ class MarkovRNN(nn.Module):
         pred_list = []
         pred_tensor_list = []
 
-        hidden_state = self.hidden_state
+        states = self.states
         belief = self.belief
         R = self.R
         inputs, targets = zip(*data)
@@ -295,7 +303,7 @@ class MarkovRNN(nn.Module):
         for step, inp in enumerate(inputs):  # bptt pass
 
             inp = inp.to(self.device)
-            pred, hidden_state, pred_k, hidden_state_k = self.forward(inp, hidden_state, belief)
+            pred, states, pred_k, states_k = self.forward(inp, states, belief)
             pred_tensor_list.append(pred)
             target = targets[step].to(self.device)
 
@@ -311,7 +319,7 @@ class MarkovRNN(nn.Module):
             pred_list.append(pred.item())
 
         if run_states:
-            self.hidden_state = hidden_state
+            self.states = states
             self.belief = belief
             self.R = R
 

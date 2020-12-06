@@ -4,8 +4,7 @@ import torch
 from torch import nn
 from torch.optim import SGD, Adam
 from torch.optim.rmsprop import RMSprop
-from torch.autograd import Variable, Function
-from torch.nn.modules.loss import _Loss
+from torch.autograd import Variable
 
 
 class RNN(nn.Module):
@@ -15,8 +14,12 @@ class RNN(nn.Module):
                             "rmsprop": RMSprop,
                             "adam": Adam}
 
-    def __init__(self, input_dim, output_dim,
-                 hidden_dim=16, bias=[0, 0], init_std=0.1, nonlinearity='relu', trunc_len=10, window_len=1, lr=0.01,
+    cell_dispatcher = {"rnn": nn.RNNCell,
+                       "gru": nn.GRUCell,
+                       "lstm": nn.LSTMCell}
+
+    def __init__(self, input_dim, output_dim, cell_type="rnn",
+                 hidden_dim=16, bias=[0, 0], init_std=0.1, trunc_len=10, window_len=1, lr=0.01,
                  weight_decay=1e-4, optimizer="sgd", shuffle_flag=False, device='cpu'):
 
         super(RNN, self).__init__()
@@ -26,7 +29,6 @@ class RNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.bias = bias
         self.init_std = init_std
-        self.nonlinearity = nonlinearity
         self.trunc_len = trunc_len
         self.window_len = window_len
         self.weight_decay = weight_decay
@@ -34,37 +36,43 @@ class RNN(nn.Module):
         self.optimizer_name = optimizer
         self.shuffle_flag = shuffle_flag
         self.device = device
+        self.cell_type = cell_type
 
-        self.cell = nn.RNNCell(input_size=input_dim, hidden_size=hidden_dim, bias=bias[0], nonlinearity=nonlinearity)
+        if self.cell_type == "lstm":
+            self.num_state_types = 2
+        else:
+            self.num_state_types = 1
+
+        self.cell = self.cell_dispatcher[cell_type](input_size=input_dim, hidden_size=hidden_dim, bias=bias[0])
         self.out_layer = nn.Linear(hidden_dim, output_dim, bias=bias[1])
-
-        if nonlinearity == "relu":
-            with torch.no_grad():
-                for parameter in self.cell.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
-                for parameter in self.out_layer.parameters():
-                    torch.nn.init.uniform_(parameter, a=0, b=self.init_std / self.hidden_dim)
 
         self.optimizer = self.optimizer_dispatcher[self.optimizer_name](lr=self.lr, weight_decay=self.weight_decay, params=self.parameters())
 
-    def __init_hidden_state(self):
-        return Variable(torch.zeros(1, self.hidden_dim).to(self.device), requires_grad=False)
+    def __init_states(self):
+        return [Variable(torch.zeros(1, self.hidden_dim).to(self.device), requires_grad=False) for _ in range(self.num_state_types)]
 
-    def forward(self, x, h):
-        # x shape (batch, input_size)
-        # h shape (batch, hidden_size)
-        h = self.cell(x, h)   # None represents zero initial hidden state
-        out = self.out_layer(h)
+    def forward(self, x, states):
 
-        return out, h
+        if len(states) == 1:
+            states = self.cell(x, states[0])
+        else:
+            states = self.cell(x, states)
+
+        if not isinstance(states, tuple):
+            states = [states]
+        else:
+            states = list(states)
+
+        out = self.out_layer(states[0])
+        return out, states
 
     def fit(self, data, verbose=True):
 
         loss_list = []
         pred_list = []
 
-        start_hidden_state = self.__init_hidden_state()
-        self.hidden_state = start_hidden_state
+        start_states = self.__init_states()
+        self.states = start_states
 
         for i in tqdm(range(1, len(data) + 1)):  # data pass
 
@@ -76,7 +84,7 @@ class RNN(nn.Module):
             start_idx = max(ii - self.trunc_len, 0)
             inputs, targets = zip(*data[start_idx: ii])
 
-            hidden_state_list = [start_hidden_state]
+            states_list = [start_states]
 
             def closure():
                 self.zero_grad()
@@ -86,12 +94,12 @@ class RNN(nn.Module):
 
                 for step, inp in enumerate(inputs):  # bptt pass
 
-                    pred, hidden_state = self.forward(inp, hidden_state_list[-1])
-                    hidden_state_list.append(hidden_state)
+                    pred, states = self.forward(inp, states_list[-1])
+                    states_list.append(states)
                     pred_tensor_list.append(pred)
 
                     if not self.shuffle_flag:
-                        self.hidden_state = hidden_state
+                        self.states = states
 
                     if step == len(inputs) - 1:  # update at the last step
                         pred_tensor = torch.cat(pred_tensor_list[-self.window_len:])
@@ -106,7 +114,8 @@ class RNN(nn.Module):
                         pred_list.append(pred.item())
 
                     if not self.shuffle_flag and step == 0:  # hold state for next data pass
-                        start_hidden_state.data = hidden_state.data
+                        for j, state in enumerate(start_states):
+                            state.data = states[j].data
 
                 return loss
 
@@ -122,11 +131,11 @@ class RNN(nn.Module):
         target_tensor_list = []
 
         inputs, targets = zip(*data)
-        hidden_state = self.hidden_state
+        states = self.states
 
         for step, inp in enumerate(inputs):  # bptt pass
 
-            pred, hidden_state = self.forward(inp, hidden_state)
+            pred, states = self.forward(inp, states)
             pred_tensor_list.append(pred)
             target_tensor_list.append(targets[step])
 
@@ -139,6 +148,6 @@ class RNN(nn.Module):
             pred_list.append(pred.item())
 
         if run_states:
-            self.hidden_state = hidden_state
+            self.states = states
 
         return pred_list, loss_list

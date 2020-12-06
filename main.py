@@ -47,7 +47,7 @@ if __name__ == '__main__':
             save_path = model_name + "_" + dataset_name + "_" + scale_mode
 
             trainer = Trainer(config_obj, model_name, dataset_name, data, device=device)
-            train_results = trainer.grid_search(data, num_repeat=num_repeat, num_process=num_process, verbose=verbose, **config_obj.experiment_params)
+            train_results = trainer.grid_search(data, model_name, num_repeat=num_repeat, num_process=num_process, verbose=verbose, **config_obj.experiment_params)
             trainer.labels = data.output_series
             trainer.data_obj = None
 

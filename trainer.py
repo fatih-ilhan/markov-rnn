@@ -7,11 +7,7 @@ from copy import deepcopy
 import matplotlib as mpl
 
 from utils.evaluation_utils import evaluate, merge_results
-from models.gru import GRU
-from models.lstm import LSTM
 from models.rnn import RNN
-from models.markov_gru import MarkovGRU
-from models.markov_lstm import MarkovLSTM
 from models.markov_rnn import MarkovRNN
 
 
@@ -29,10 +25,10 @@ class Trainer:
         self.best_conf_idx = None
         self._is_fit = False
 
-        self.model_dispatcher = {"rnn": RNN, "markov_rnn": MarkovRNN, "lstm": LSTM, "markov_lstm": MarkovLSTM,
-                                 "gru": GRU, "markov_gru": MarkovGRU}
+        self.model_dispatcher = {"rnn": RNN, "markov_rnn": MarkovRNN, "lstm": RNN, "markov_lstm": MarkovRNN,
+                                 "gru": RNN, "markov_gru": MarkovRNN}
 
-    def grid_search(self, data, num_repeat=1, num_process=4, verbose=True, **experiment_params):
+    def grid_search(self, data, model_name, num_repeat=1, num_process=4, verbose=True, **experiment_params):
 
         num_confs = self.config_obj.num_confs  # 50
         num_sub_confs = int(np.ceil(num_confs / num_process))  # 50 / 4 -> 13
@@ -47,14 +43,16 @@ class Trainer:
             process_list = []
 
             for sub_conf_idx, conf in enumerate(sub_conf_list):
+                conf["cell_type"] = model_name.split("_")[-1]
                 args = (data, conf_idx, conf, num_repeat, num_confs, verbose, experiment_params, results_dict, models_dict)
                 conf_idx += 1
-                p = Process(target=self.grid_search_worker, args=args)
-                process_list.append(p)
-                p.start()
-
-            for p in process_list:
-                p.join()
+                self.grid_search_worker(*args)
+            #     p = Process(target=self.grid_search_worker, args=args)
+            #     process_list.append(p)
+            #     p.start()
+            #
+            # for p in process_list:
+            #     p.join()
 
             self.results_dict.update(dict(results_dict))
             self.models_dict.update(dict(models_dict))
