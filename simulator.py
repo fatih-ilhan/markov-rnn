@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.linalg import toeplitz
 
 
 class ARIMASimulator:
@@ -195,12 +196,21 @@ def simulate_binary_data(operation_list, period_list, ratio_list):
 if __name__ == '__main__':
     mode = "sin"
     if mode == "arima":
-        ar_list = [[1], [.9], [.5]]
-        std_list = [.1, .1, .1]
-        period_list = [1000] * 3
-        ratio_list = [.34, .33, .33]
+        ar_list = [[1], [-.95], [.9], [-.85], [.8]]
+        std_list = [.1, .1, .1, .1, .1]
+        period_list = [1000] * 5
+        ratio_list = [.2] * 5
         x = simulate_ar_data(ar_list, std_list, period_list, ratio_list)
         plt.plot(np.concatenate([x]))
+        plt.show()
+    elif mode == "arima_markov":
+        ar_list = [[0.95, 0.5, -0.5], [0.9, -0.5, 0.5], [1], [-0.9], [0.5]]
+        std_list = [.1, .1, .1, .1, .1]
+        psi = toeplitz([0.98, 0.005, 0.005, 0.005, 0.005])
+        seq_len = 5000
+        x = simulate_ar_markov_data(ar_list, std_list, seq_len, psi)
+        plt.plot(np.concatenate([x[0]]))
+        plt.plot(x[1])
         plt.show()
     elif mode == "binary":
         operation_list = ["+", "-"]
@@ -208,10 +218,10 @@ if __name__ == '__main__':
         ratio_list = [.5, .5]
         x = simulate_binary_data(operation_list, period_list, ratio_list)
     elif mode == "sin":
-        std_list = [0.01, 0.01]
-        psi = np.array([[0.99, 0.01], [0.01, 0.99]])
-        period_list = [50, 200]
-        mag_list = [0.5, 0.5]
+        std_list = [0.05, 0.05, 0.05, 0.05, 0.05]
+        psi = toeplitz([0.98, 0.005, 0.005, 0.005, 0.005])
+        period_list = [50, 100, 150, 200, 250]
+        mag_list = [0.5, 0.5, 0.5, 0.5, 0.5]
         seq_len = 5000
         x = simulate_sin_markov_data(period_list, mag_list, std_list, seq_len, psi)
         plt.figure(figsize=(20, 8))

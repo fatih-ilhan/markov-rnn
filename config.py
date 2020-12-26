@@ -1,15 +1,15 @@
 import itertools
 from random import shuffle
 
-model_params_pool = {"rnn": {"hidden_dim": [8, 32],
+model_params_pool = {"rnn": {"hidden_dim": [16],
                              "bias": [[0, 0]],
-                             "trunc_len": [4, 16],
+                             "trunc_len": [8],
                              "window_len": [1],
-                             "lr": [0.003, 0.01, 0.03],
+                             "lr": [0.01],
                              "weight_decay": [0],
                              "optimizer": ["sgd"],
                              "shuffle_flag": [False]},
-                     "markov_rnn": {"hidden_dim": [32],
+                     "markov_rnn": {"hidden_dim": [8],
                                     "bias": [[0, 0]],
                                     "alpha": [0.7],  # psi diagonal
                                     "beta": [0.99],
@@ -61,12 +61,12 @@ class Config:
     This object contains manually given parameters
     """
     def __init__(self, model_name):
-        self.experiment_params = {"evaluation_metric": ["mean_squared_error"],
-                                  "diff_flag": True,
-                                  "scale_mode": "none",
+        self.experiment_params = {"evaluation_metric": ["mean_squared_error", "mae", "mape"],
+                                  "diff_flag": False,
+                                  "scale_mode": "minmax",
                                   "online_flag": False,
-                                  "num_epochs": 10,
-                                  "early_stop_tolerance": 3,
+                                  "num_epochs": 30,
+                                  "early_stop_tolerance": 5,
                                   "train_val_test_ratio": [0.6, 0.2, 0.2]}
 
         assert len(self.experiment_params["train_val_test_ratio"]) == 3 and \

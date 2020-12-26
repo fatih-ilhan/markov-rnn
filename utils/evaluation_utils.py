@@ -8,6 +8,10 @@ def evaluate(pred, label, metric_list):
     for metric in metric_list:
         if metric == "mean_squared_error":
             result = np.mean((pred - label) ** 2)
+        elif metric == "mae":
+            result = skmetrics.mean_absolute_error(label, pred)
+        elif metric == "mape":
+            result = skmetrics.mean_absolute_percentage_error(label, pred)
         else:
             raise KeyError
 
@@ -40,4 +44,4 @@ def merge_results(results_dict_list, mode="mean"):
 
 
 def mape(labels, preds):
-    return np.mean(abs(preds - labels) / labels)
+    return np.mean(abs((preds - labels) / labels))

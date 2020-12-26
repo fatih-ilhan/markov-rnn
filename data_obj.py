@@ -1,5 +1,6 @@
 import os
 import pickle as pkl
+import datetime as dt
 import numpy as np
 import pandas as pd
 from scipy.io import loadmat
@@ -31,7 +32,7 @@ class Data:
         # data: tuple of lists for input target pairs
         # input_series: x_0, x_1, x_2 ...
         # output_series: y_0, y_1, y_2 ...
-        self.data, self.input_series, self.output_series = self.prepare_data()
+        self.data, self.input_series, self.output_series, self.offset = self.prepare_data()
         self.input_dim = self.data[0][0].shape[-1]
         self.output_dim = self.data[0][1].shape[-1]
         self.len = len(self.data[0])
@@ -41,31 +42,33 @@ class Data:
 
     def prepare_data(self):
 
-        helper_dispatcher = {"elev": self.prepare_data_elev,
-                             "puma32f": self.prepare_data_puma32f,
-                             "pumadyn": self.prepare_data_pumadyn,
-                             "alcoa": self.prepare_data_alcoa,
-                             "euro": self.prepare_data_euro,
-                             "sim_arima": self.prepare_data_sim_arima,
+        helper_dispatcher = {"sim_arima": self.prepare_data_sim_arima,
+                             "sim_arima_5": self.prepare_data_sim_arima,
                              "sim_arima_markov": self.prepare_data_sim_arima_markov,
+                             "sim_arima_markov_5": self.prepare_data_sim_arima_markov,
                              "sim_binary": self.prepare_data_sim_binary,
                              "sim_ts": self.prepare_data_sim_ts,
                              "sim_sin_markov": self.prepare_data_sim_sin_markov,
+                             "sim_sin_markov_5": self.prepare_data_sim_sin_markov,
                              "USDEUR": self.prepare_data_usdeur,
                              "USDGBP": self.prepare_data_usdgbp,
                              "USDCHF": self.prepare_data_usdchf,
                              "USDJPY": self.prepare_data_usdjpy,
                              "USDTRY": self.prepare_data_usdtry,
-                             "USDXAU": self.prepare_data_usdxau}
+                             "USDXAU": self.prepare_data_usdxau,
+                             "sales": self.prepare_data_sales,
+                             "electric": self.prepare_data_electric}
 
         return helper_dispatcher[self.dataset_name]()
 
-    def prepare_data_elev(self):
-        matfile = loadmat(os.path.join(self.data_dir, "elev_data.mat"))
-        seq = matfile["nngc_data"]
+    def prepare_data_sales(self):
+        data = pd.read_csv("data/sales.csv")
+        seq = np.array(data.iloc[:, 6:].sum(axis=0))
 
+        offset = 0
         if self.diff_flag:
-            seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
+            offset = seq[0]
+            seq[:-1] = seq[1:] - seq[:-1]
             seq = seq[:-1]
 
         norm_seq = self.normalize_data(seq)
@@ -73,19 +76,33 @@ class Data:
             norm_seq = torch.FloatTensor(norm_seq)
 
         data = []
-        for i in range(len(seq)):
-            inp = norm_seq[i, :-1].reshape(1, -1)
-            out = norm_seq[i, -1].reshape(1, -1)
+        for i in range(len(seq) - 1):
+            inp = norm_seq[i].reshape(1, -1)
+            out = norm_seq[i + 1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:, :-1], seq[:, -1]
+        return data, seq[:-1], seq[1:], offset
 
-    def prepare_data_puma32f(self):
-        matfile = loadmat(os.path.join(self.data_dir, "puma32f.mat"))
-        seq = matfile["nngc_data"]
+    def prepare_data_electric(self):
+        data_path = f"data/electric.npy"
+        if os.path.isfile(data_path):
+            seq = np.load(data_path)
+        else:
+            data = pd.read_csv("data/electricity_2.txt", delimiter=";")
+            data = data.rename(columns={"Unnamed: 0": "date"})
+            data.date = pd.to_datetime(data.date)
+            data = data[data.date > dt.datetime(2012, 1, 1)]
+            seq = data.iloc[:, 1:].groupby(pd.DatetimeIndex(data.date).floor("D")).mean()
+            seq = seq[:-1]
+            seq = np.array(seq)
+            np.save(data_path, seq)
 
+        seq = seq[:, 0]
+
+        offset = 0
         if self.diff_flag:
-            seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
+            offset = seq[0]
+            seq[:-1] = seq[1:] - seq[:-1]
             seq = seq[:-1]
 
         norm_seq = self.normalize_data(seq)
@@ -93,73 +110,12 @@ class Data:
             norm_seq = torch.FloatTensor(norm_seq)
 
         data = []
-        for i in range(len(norm_seq)):
-            inp = norm_seq[i, :-1].reshape(1, -1)
-            out = norm_seq[i, -1].reshape(1, -1)
+        for i in range(len(seq) - 1):
+            inp = norm_seq[i].reshape(1, -1)
+            out = norm_seq[i + 1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:, :-1], seq[:, -1]
-
-    def prepare_data_pumadyn(self):
-        matfile = loadmat(os.path.join(self.data_dir, "puma3_data.mat"))
-        seq = matfile["our_data"]
-
-        if self.diff_flag:
-            seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
-            seq = seq[:-1]
-
-        norm_seq = self.normalize_data(seq)
-        if self.tensor_flag:
-            norm_seq = torch.FloatTensor(norm_seq)
-
-        data = []
-        for i in range(len(norm_seq)):
-            inp = norm_seq[i, :-1].reshape(1, -1)
-            out = norm_seq[i, -1].reshape(1, -1)
-            data.append((inp, out))
-
-        return data, seq[:, :-1], seq[:, -1]
-
-    def prepare_data_alcoa(self):
-        matfile = loadmat(os.path.join(self.data_dir, "fin_multi_data2.mat"))
-        seq = matfile["nngc_data"]
-
-        if self.diff_flag:
-            seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
-            seq = seq[:-1]
-
-        norm_seq = self.normalize_data(seq)
-        if self.tensor_flag:
-            norm_seq = torch.FloatTensor(norm_seq)
-
-        data = []
-        for i in range(len(norm_seq)-1):
-            inp = norm_seq[i, :].reshape(1, -1)
-            out = norm_seq[i+1, 0].reshape(1, -1)
-            data.append((inp, out))
-
-        return data, seq[:-1], seq[1:, 0]  # todo check
-
-    def prepare_data_euro(self):
-        matfile = loadmat(os.path.join(self.data_dir, "euro_data2.mat"))
-
-        seq = matfile["nngc_data"]
-
-        if self.diff_flag:
-            seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
-            seq = seq[:-1]
-
-        norm_seq = self.normalize_data(seq)
-        if self.tensor_flag:
-            norm_seq = torch.FloatTensor(norm_seq)
-
-        data = []
-        for i in range(len(norm_seq)-1):
-            inp = norm_seq[i, :].reshape(1, -1)
-            out = norm_seq[i+1, 0].reshape(1, -1)
-            data.append((inp, out))
-
-        return data, seq[:-1], seq[1:, 0]  # todo check
+        return data, seq[:-1], seq[1:], offset
 
     def prepare_data_usdeur(self):
         return self.prepare_data_currency("USDEUR")
@@ -210,7 +166,9 @@ class Data:
         cols = [col for col in data_features.columns if cur_pair in col]
         seq = np.array(data_features[cols]).reshape((len(data_features), -1))
 
+        offset = 0
         if self.diff_flag:
+            offset = seq[0, 0]
             seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
             seq = seq[:-1]
 
@@ -224,10 +182,10 @@ class Data:
             out = norm_seq[i+1, 0].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:-1, :], seq[1:, 0]  # todo check
+        return data, seq[:-1, :], seq[1:, 0], offset  # todo check
 
     def prepare_data_sim_arima(self):
-        data_path = "data/sim_arima.npy"
+        data_path = f"data/{self.dataset_name}.npy"
         if os.path.isfile(data_path):
             seq = np.load(data_path)
         else:
@@ -238,7 +196,9 @@ class Data:
             seq = simulate_ar_data(ar_list, std_list, period_list, ratio_list)
             np.save(data_path, seq)
 
+        offset = 0
         if self.diff_flag:
+            offset = seq[0]
             seq[:-1] = seq[1:] - seq[:-1]
             seq = seq[:-1]
 
@@ -252,10 +212,10 @@ class Data:
             out = norm_seq[i + 1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:-1], seq[1:]
+        return data, seq[:-1], seq[1:], offset
 
     def prepare_data_sim_arima_markov(self):
-        data_path = "data/sim_arima_markov.pkl"
+        data_path = f"data/{self.dataset_name}.pkl"
         if os.path.isfile(data_path):
             seq = pkl.load(open(data_path, 'rb'))
         else:
@@ -267,7 +227,9 @@ class Data:
             pkl.dump(seq, open(data_path, 'wb'))
         seq = seq[0]
 
+        offset = 0
         if self.diff_flag:
+            offset = seq[0, 0]
             seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
             seq = seq[:-1]
 
@@ -281,10 +243,10 @@ class Data:
             out = norm_seq[i + 1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:-1], seq[1:]
+        return data, seq[:-1], seq[1:], offset
 
     def prepare_data_sim_sin_markov(self):
-        data_path = "data/sim_sin_markov.pkl"
+        data_path = f"data/{self.dataset_name}.pkl"
         if os.path.isfile(data_path):
             seq = pkl.load(open(data_path, 'rb'))
         else:
@@ -297,7 +259,9 @@ class Data:
             pkl.dump(seq, open(data_path, 'wb'))
         seq = seq[0]
 
+        offset = 0
         if self.diff_flag:
+            offset = seq[0]
             seq[:-1] = seq[1:] - seq[:-1]
             seq = seq[:-1]
 
@@ -311,7 +275,7 @@ class Data:
             out = norm_seq[i + 1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:-1], seq[1:]
+        return data, seq[:-1], seq[1:], offset
 
     def prepare_data_sim_binary(self):
         operation_list = ["+", "-"]
@@ -319,7 +283,9 @@ class Data:
         ratio_list = [.5, .5]
         seq = simulate_binary_data(operation_list, period_list, ratio_list)
 
+        offset = 0
         if self.diff_flag:
+            offset = seq[0, 0]
             seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
 
         norm_seq = self.normalize_data(seq)
@@ -332,7 +298,7 @@ class Data:
             out = norm_seq[i, -1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:, :-1], seq[:, -1]
+        return data, seq[:, :-1], seq[:, -1], offset
 
     def prepare_data_sim_ts(self):
         trend_list = [-0., 0., 0.]
@@ -343,7 +309,9 @@ class Data:
 
         seq = simulate_ts_data(trend_list, seasonality_list, std_list, period_list, ratio_list)
 
+        offset = 0
         if self.diff_flag:
+            offset = seq[0, 0]
             seq[:-1, 0] = seq[1:, 0] - seq[:-1, 0]
             seq = seq[:-1]
 
@@ -357,7 +325,7 @@ class Data:
             out = norm_seq[i + 1].reshape(1, -1)
             data.append((inp, out))
 
-        return data, seq[:-1], seq[1:]
+        return data, seq[:-1], seq[1:], offset
 
     def normalize_data(self, data):
         if self.scale_mode != "none":
@@ -370,6 +338,6 @@ class Data:
 
 
 if __name__ == '__main__':
-    dataset_name = "elev"
+    dataset_name = "electric"
     data = Data(dataset_name)
     print(len(data.data))

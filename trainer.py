@@ -75,6 +75,7 @@ class Trainer:
         input_dim = data.input_dim
         output_dim = data.output_dim
         data_pair = data.data
+        offset = data.offset
 
         train_results_dict = {}
         train_conf_results_list = []
@@ -131,12 +132,17 @@ class Trainer:
                         print(conf)
 
                     train_pred, train_loss_list = model.fit(train_data, verbose=verbose)
-                    if hasattr(self.data_obj, "scaler"):
+                    if hasattr(self.data_obj, "pred_scaler"):
                         train_pred = self.data_obj.pred_scaler.inverse_transform(np.stack(train_pred).reshape(-1, 1))
                     else:
                         train_pred = np.stack(train_pred).reshape(-1, 1)
                     train_label = data.output_series[split_indices[0] - len(train_pred): split_indices[0]].reshape(-1,1)
                     train_loss_array = np.array(train_loss_list)
+
+                    if data.diff_flag:
+                        train_pred = offset + np.cumsum(train_label) - train_label[:, 0] + train_pred[:, 0]
+                        train_label = offset + np.cumsum(train_label)
+
                     train_results = evaluate(train_pred, train_label, evaluation_metric)
 
                     if online_flag:
@@ -154,12 +160,17 @@ class Trainer:
                     else:
                         val_pred, val_loss_list = model.predict(val_data)
 
-                    if hasattr(self.data_obj, "scaler"):
+                    if hasattr(self.data_obj, "pred_scaler"):
                         val_pred = self.data_obj.pred_scaler.inverse_transform(np.stack(val_pred).reshape(-1, 1))
                     else:
                         val_pred = np.stack(val_pred).reshape(-1, 1)
                     val_label = data.output_series[split_indices[1]-len(val_pred): split_indices[1]].reshape(-1, 1)
                     val_loss_array = np.array(val_loss_list)
+
+                    if data.diff_flag:
+                        val_pred = offset + np.cumsum(val_label) + train_label[-1] - val_label[:, 0] + val_pred[:, 0]
+                        val_label = offset + np.cumsum(val_label) + train_label[-1]
+
                     val_results = evaluate(val_pred, val_label, evaluation_metric)
 
                     print("Train results: ", train_results)
@@ -200,13 +211,18 @@ class Trainer:
             else:
                 test_pred, test_loss_list = model.predict(test_data)
 
-            if hasattr(self.data_obj, "scaler"):
+            if hasattr(self.data_obj, "pred_scaler"):
                 test_pred = self.data_obj.pred_scaler.inverse_transform(np.stack(test_pred).reshape(-1, 1))
             else:
                 test_pred = np.stack(test_pred).reshape(-1, 1)
 
             test_label = data.output_series[- len(test_pred):].reshape(-1, 1)
             test_loss_array = np.array(test_loss_list)
+
+            if data.diff_flag:
+                test_pred = offset + np.cumsum(test_label) + val_label[-1] - test_label[:, 0] + test_pred[:, 0]
+                test_label = offset + np.cumsum(test_label) + val_label[-1]
+
             test_results = evaluate(test_pred, test_label, evaluation_metric)
 
             test_conf_results_list.append(test_results)

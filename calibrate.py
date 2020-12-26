@@ -1,6 +1,7 @@
 import pickle as pkl
 from sklearn.linear_model import LinearRegression
 from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, mean_squared_error
 from utils.evaluation_utils import mape
 
 
@@ -16,14 +17,14 @@ isotonic_reg = IsotonicRegression().fit(val_preds, val_labels)
 test_preds_lin = linear_reg.predict(test_preds.reshape(-1, 1))
 test_preds_iso = isotonic_reg.predict(test_preds)
 
-print("test MSE:", ((test_labels-test_preds)**2).mean())
-print("test MAE:", (abs(test_labels-test_preds).mean()))
-print("test MAPE:", (mape(test_labels, test_preds)))
+print("test MSE:", mean_squared_error(test_labels, test_preds))
+print("test MAE:", mean_absolute_error(test_labels, test_preds))
+print("test MAPE:", mean_absolute_percentage_error(test_labels, test_preds))
 
-print("test MSE lin:", ((test_labels-test_preds_lin.squeeze())**2).mean())
-print("test MAE lin:", (abs(test_labels-test_preds_lin.squeeze()).mean()))
-print("test MAPE lin:", (mape(test_labels, test_preds_lin.squeeze())))
+print("test MSE lin:", mean_squared_error(test_labels, test_preds_lin))
+print("test MAE lin:", mean_absolute_error(test_labels, test_preds_lin))
+print("test MAPE lin:", mean_absolute_percentage_error(test_labels, test_preds_lin))
 
-print("test MSE iso:", ((test_labels-test_preds_iso.squeeze())**2).mean())
-print("test MAE iso:", (abs(test_labels-test_preds_iso.squeeze()).mean()))
-print("test MAPE iso:", (mape(test_labels, test_preds_iso.squeeze())))
+print("test MSE iso:", mean_squared_error(test_labels, test_preds_iso))
+print("test MAE iso:", mean_absolute_error(test_labels, test_preds_iso))
+print("test MAPE iso:", mean_absolute_percentage_error(test_labels, test_preds_iso))
